@@ -119,6 +119,7 @@ static bool addSpan(rcHeightfield& hf,
 	newSpan->area = areaID;
 	newSpan->next = NULL;
 	
+	// 构造链表数组下标
 	const int columnIndex = x + z * hf.width;
 	rcSpan* previousSpan = NULL;
 	rcSpan* currentSpan = hf.spans[columnIndex];
@@ -244,18 +245,22 @@ static void dividePoly(const float* inVerts, int inVertsCount,
 		// If the two vertices are on the same side of the separating axis
 		bool sameSide = (inVertAxisDelta[inVertA] >= 0) == (inVertAxisDelta[inVertB] >= 0);
 
+		// 边的两个顶点在分割线两端，被切割
 		if (!sameSide)
 		{
 			float s = inVertAxisDelta[inVertB] / (inVertAxisDelta[inVertB] - inVertAxisDelta[inVertA]);
+			// 按比例计算交点三个坐标
 			outVerts1[poly1Vert * 3 + 0] = inVerts[inVertB * 3 + 0] + (inVerts[inVertA * 3 + 0] - inVerts[inVertB * 3 + 0]) * s;
 			outVerts1[poly1Vert * 3 + 1] = inVerts[inVertB * 3 + 1] + (inVerts[inVertA * 3 + 1] - inVerts[inVertB * 3 + 1]) * s;
 			outVerts1[poly1Vert * 3 + 2] = inVerts[inVertB * 3 + 2] + (inVerts[inVertA * 3 + 2] - inVerts[inVertB * 3 + 2]) * s;
+			// 把交点加入两个输出
 			rcVcopy(&outVerts2[poly2Vert * 3], &outVerts1[poly1Vert * 3]);
 			poly1Vert++;
 			poly2Vert++;
 			
 			// add the inVertA point to the right polygon. Do NOT add points that are on the dividing line
 			// since these were already added above
+			// 把点A也加入数组
 			if (inVertAxisDelta[inVertA] > 0)
 			{
 				rcVcopy(&outVerts1[poly1Vert * 3], &inVerts[inVertA * 3]);
@@ -267,10 +272,10 @@ static void dividePoly(const float* inVerts, int inVertsCount,
 				poly2Vert++;
 			}
 		}
-		else
+		else// 同一端
 		{
 			// add the inVertA point to the right polygon. Addition is done even for points on the dividing line
-			if (inVertAxisDelta[inVertA] >= 0)
+			if (inVertAxisDelta[inVertA] >= 0)//小于轴，加入；大于则留待后面切割
 			{
 				rcVcopy(&outVerts1[poly1Vert * 3], &inVerts[inVertA * 3]);
 				poly1Vert++;
@@ -288,7 +293,7 @@ static void dividePoly(const float* inVerts, int inVertsCount,
 	*outVerts2Count = poly2Vert;
 }
 
-///	Rasterize a single triangle to the heightfield.
+///	把三角形体素化到高度场 Rasterize a single triangle to the heightfield.
 ///
 ///	This code is extremely hot, so much care should be given to maintaining maximum perf here.
 /// 
@@ -310,18 +315,19 @@ static bool rasterizeTri(const float* v0, const float* v1, const float* v2,
                          const float cellSize, const float inverseCellSize, const float inverseCellHeight,
                          const int flagMergeThreshold)
 {
+	// 计算三角形包围盒
 	// Calculate the bounding box of the triangle.
 	float triBBMin[3];
 	rcVcopy(triBBMin, v0);
-	rcVmin(triBBMin, v1);
+	rcVmin(triBBMin, v1); 
 	rcVmin(triBBMin, v2);
-
 	float triBBMax[3];
 	rcVcopy(triBBMax, v0);
 	rcVmax(triBBMax, v1);
 	rcVmax(triBBMax, v2);
 
 	// If the triangle does not touch the bounding box of the heightfield, skip the triangle.
+	// 超出高度场包围盒，跳过
 	if (!overlapBounds(triBBMin, triBBMax, hfBBMin, hfBBMax))
 	{
 		return true;
@@ -329,18 +335,22 @@ static bool rasterizeTri(const float* v0, const float* v1, const float* v2,
 
 	const int w = hf.width;
 	const int h = hf.height;
-	const float by = hfBBMax[1] - hfBBMin[1];
+	const float by = hfBBMax[1] - hfBBMin[1];//高度场包围盒高度范围
 
 	// Calculate the footprint of the triangle on the grid's z-axis
+	// 三角形包围盒最小z坐标相对于高度场的起始z坐标的格子数（相对格子）
 	int z0 = (int)((triBBMin[2] - hfBBMin[2]) * inverseCellSize);
+	// 三角形包围盒最大z坐标相对于高度场的起始z坐标的格子数（相对格子）
 	int z1 = (int)((triBBMax[2] - hfBBMin[2]) * inverseCellSize);
 
 	// use -1 rather than 0 to cut the polygon properly at the start of the tile
+	// 过滤非法值
 	z0 = rcClamp(z0, -1, h - 1);
 	z1 = rcClamp(z1, 0, h - 1);
 
 	// Clip the triangle into all grid cells it touches.
 	float buf[7 * 3 * 4];
+	// 输入三角形数据
 	float* in = buf;
 	float* inRow = buf + 7 * 3;
 	float* p1 = inRow + 7 * 3;
@@ -351,12 +361,14 @@ static bool rasterizeTri(const float* v0, const float* v1, const float* v2,
 	rcVcopy(&in[2 * 3], v2);
 	int nvRow;
 	int nvIn = 3;
-
+	// z轴切割
 	for (int z = z0; z <= z1; ++z)
 	{
 		// Clip polygon to row. Store the remaining polygon as well
 		const float cellZ = hfBBMin[2] + (float)z * cellSize;
+		// 分为in和p1两部分
 		dividePoly(in, nvIn, inRow, &nvRow, p1, &nvIn, cellZ + cellSize, RC_AXIS_Z);
+		// 交换in和p1，以便后面循环继续用in切割
 		rcSwap(in, p1);
 		
 		if (nvRow < 3)
@@ -394,6 +406,7 @@ static bool rasterizeTri(const float* v0, const float* v1, const float* v2,
 		int nv;
 		int nv2 = nvRow;
 
+		// x轴切割
 		for (int x = x0; x <= x1; ++x)
 		{
 			// Clip polygon to column. store the remaining polygon as well

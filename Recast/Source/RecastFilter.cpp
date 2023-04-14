@@ -21,6 +21,7 @@
 
 #include <stdlib.h>
 
+// 可攀登高度的并且下面的span可行走的，也标记为可行走(直立楼梯)
 void rcFilterLowHangingWalkableObstacles(rcContext* context, const int walkableClimb, rcHeightfield& heightfield)
 {
 	rcAssert(context);
@@ -59,6 +60,14 @@ void rcFilterLowHangingWalkableObstacles(rcContext* context, const int walkableC
 	}
 }
 
+/*
+悬崖陡坡检测
+定义邻居体素可达的条件为：min(top, ntop) - max(bot, nbot) > walkableHeight。则对于某个体素，其所有可达的邻居体素中：
+
+1.如果存在(bot - nbot > walkableClimb)，则将该体素修正为不可行走。
+
+2.如果max(nbot) - min(nbot) > walkableClimb，则将该体素修正为不可行走
+*/
 void rcFilterLedgeSpans(rcContext* context, const int walkableHeight, const int walkableClimb,
                         rcHeightfield& heightfield)
 {
@@ -92,24 +101,29 @@ void rcFilterLedgeSpans(rcContext* context, const int walkableHeight, const int 
 				// Min and max height of accessible neighbours.
 				int accessibleNeighborMinHeight = span->smax;
 				int accessibleNeighborMaxHeight = span->smax;
-
+				// 这里y轴和z轴的定义有点和前面不一致了，其实应该是dx和dz
+				// 遍历四个方向邻居找到最小、最大高度
 				for (int direction = 0; direction < 4; ++direction)
 				{
+					// 邻居x坐标
 					int dx = x + rcGetDirOffsetX(direction);
+					// 邻居z坐标
 					int dy = z + rcGetDirOffsetY(direction);
 					// Skip neighbours which are out of bounds.
+					// 已超出范围，更新最矮邻居
 					if (dx < 0 || dy < 0 || dx >= xSize || dy >= zSize)
 					{
 						minNeighborHeight = rcMin(minNeighborHeight, -walkableClimb - bot);
 						continue;
 					}
 
-					// From minus infinity to the first span.
+					// 邻居spanFrom minus infinity to the first span.
 					const rcSpan* neighborSpan = heightfield.spans[dx + dy * xSize];
 					int neighborBot = -walkableClimb;
 					int neighborTop = neighborSpan ? (int)neighborSpan->smin : MAX_HEIGHT;
 					
 					// Skip neighbour if the gap between the spans is too small.
+					// 两span间空隙矮于可行走高度
 					if (rcMin(top, neighborTop) - rcMax(bot, neighborBot) > walkableHeight)
 					{
 						minNeighborHeight = rcMin(minNeighborHeight, neighborBot - bot);
@@ -122,11 +136,13 @@ void rcFilterLedgeSpans(rcContext* context, const int walkableHeight, const int 
 						neighborTop = neighborSpan->next ? (int)neighborSpan->next->smin : MAX_HEIGHT;
 						
 						// Skip neighbour if the gap between the spans is too small.
+						// 高度大于身高，可行走
 						if (rcMin(top, neighborTop) - rcMax(bot, neighborBot) > walkableHeight)
 						{
+							// 更新最小高度
 							minNeighborHeight = rcMin(minNeighborHeight, neighborBot - bot);
 
-							// Find min/max accessible neighbour height. 
+							// 可攀爬，更新accessible Find min/max accessible neighbour height. 
 							if (rcAbs(neighborBot - bot) <= walkableClimb)
 							{
 								if (neighborBot < accessibleNeighborMinHeight) accessibleNeighborMinHeight = neighborBot;
@@ -144,7 +160,7 @@ void rcFilterLedgeSpans(rcContext* context, const int walkableHeight, const int 
 					span->area = RC_NULL_AREA;
 				}
 				// If the difference between all neighbours is too large,
-				// we are at steep slope, mark the span as ledge.
+				// we are at steep slope, mark the span as ledge.陡坡，不可行走
 				else if ((accessibleNeighborMaxHeight - accessibleNeighborMinHeight) > walkableClimb)
 				{
 					span->area = RC_NULL_AREA;
@@ -154,6 +170,7 @@ void rcFilterLedgeSpans(rcContext* context, const int walkableHeight, const int 
 	}
 }
 
+// 过滤高度不足站立的span
 void rcFilterWalkableLowHeightSpans(rcContext* context, const int walkableHeight, rcHeightfield& heightfield)
 {
 	rcAssert(context);

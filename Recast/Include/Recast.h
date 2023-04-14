@@ -1017,7 +1017,7 @@ bool rcRasterizeTriangles(rcContext* context,
 /// @param[in,out]	heightfield			A fully built heightfield.  (All spans have been added.)
 void rcFilterLowHangingWalkableObstacles(rcContext* context, int walkableClimb, rcHeightfield& heightfield);
 
-/// Marks spans that are ledges as not-walkable.
+/// 悬崖消除 Marks spans that are ledges as not-walkable.
 ///
 /// A ledge is a span with one or more neighbors whose maximum is further away than @p walkableClimb
 /// from the current span's maximum.

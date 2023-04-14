@@ -33,6 +33,7 @@
 /// This method is usually called immediately after the heightfield has been built.
 ///
 /// @see rcCompactHeightfield, rcBuildCompactHeightfield, rcConfig::walkableRadius
+// 剔除边缘，根据角色半径侵蚀可行走区域
 bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 {
 	rcAssert(ctx);
@@ -49,10 +50,11 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 		return false;
 	}
 	
-	// Init distance.
+	// Init distance.距离初始化为255
 	memset(dist, 0xff, sizeof(unsigned char)*chf.spanCount);
 	
 	// Mark boundary cells.
+	// 标记边界cells
 	for (int y = 0; y < h; ++y)
 	{
 		for (int x = 0; x < w; ++x)
@@ -60,7 +62,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 			const rcCompactCell& c = chf.cells[x+y*w];
 			for (int i = (int)c.index, ni = (int)(c.index+c.count); i < ni; ++i)
 			{
-				if (chf.areas[i] == RC_NULL_AREA)
+				if (chf.areas[i] == RC_NULL_AREA)// 不可行走区域标记为0
 				{
 					dist[i] = 0;
 				}
@@ -82,7 +84,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 						}
 					}
 					// At least one missing neighbour.
-					if (nc != 4)
+					if (nc != 4)// 如果是个方向有任意一个方向不可达，标记为0
 						dist[i] = 0;
 				}
 			}
@@ -103,7 +105,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 				
 				if (rcGetCon(s, 0) != RC_NOT_CONNECTED)
 				{
-					// (-1,0)
+					// (-1,0) 左边
 					const int ax = x + rcGetDirOffsetX(0);
 					const int ay = y + rcGetDirOffsetY(0);
 					const int ai = (int)chf.cells[ax+ay*w].index + rcGetCon(s, 0);
@@ -112,7 +114,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 					if (nd < dist[i])
 						dist[i] = nd;
 					
-					// (-1,-1)
+					// (-1,-1)左上
 					if (rcGetCon(as, 3) != RC_NOT_CONNECTED)
 					{
 						const int aax = ax + rcGetDirOffsetX(3);

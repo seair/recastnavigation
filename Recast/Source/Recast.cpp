@@ -303,6 +303,7 @@ void rcCalcGridSize(const float* minBounds, const float* maxBounds, const float 
 	*sizeZ = (int)((maxBounds[2] - minBounds[2]) / cellSize + 0.5f);
 }
 
+// 创建高度场数据
 bool rcCreateHeightfield(rcContext* context, rcHeightfield& heightfield, int sizeX, int sizeZ,
                          const float* minBounds, const float* maxBounds,
                          float cellSize, float cellHeight)
@@ -333,6 +334,7 @@ static void calcTriNormal(const float* v0, const float* v1, const float* v2, flo
 	rcVnormalize(faceNormal);
 }
 
+// 标记三角形平面是否可以行走(斜率过滤)
 void rcMarkWalkableTriangles(rcContext* context, const float walkableSlopeAngle,
                              const float* verts, const int numVerts,
                              const int* tris, const int numTris,
@@ -341,15 +343,20 @@ void rcMarkWalkableTriangles(rcContext* context, const float walkableSlopeAngle,
 	rcIgnoreUnused(context);
 	rcIgnoreUnused(numVerts);
 
+	// 计算最大斜率的单格子高度差
 	const float walkableThr = cosf(walkableSlopeAngle / 180.0f * RC_PI);
 
+	// 三角形平面法向量
 	float norm[3];
 
+	// 遍历计算
 	for (int i = 0; i < numTris; ++i)
 	{
 		const int* tri = &tris[i * 3];
+		// 计算三角形的法线向量(模为1)
 		calcTriNormal(&verts[tri[0] * 3], &verts[tri[1] * 3], &verts[tri[2] * 3], norm);
 		// Check if the face is walkable.
+		// 如果法线向量在y轴方向的投影大于最大高度差，则可行走
 		if (norm[1] > walkableThr)
 		{
 			triAreaIDs[i] = RC_WALKABLE_AREA;
@@ -400,6 +407,7 @@ int rcGetHeightFieldSpanCount(rcContext* context, const rcHeightfield& heightfie
 	return spanCount;
 }
 
+// 构建紧凑高度场(反体素化)
 bool rcBuildCompactHeightfield(rcContext* context, const int walkableHeight, const int walkableClimb,
                                rcHeightfield& heightfield, rcCompactHeightfield& compactHeightfield)
 {
@@ -420,6 +428,7 @@ bool rcBuildCompactHeightfield(rcContext* context, const int walkableHeight, con
 	compactHeightfield.maxRegions = 0;
 	rcVcopy(compactHeightfield.bmin, heightfield.bmin);
 	rcVcopy(compactHeightfield.bmax, heightfield.bmax);
+	// 补上一个可行走高度
 	compactHeightfield.bmax[1] += walkableHeight * heightfield.ch;
 	compactHeightfield.cs = heightfield.cs;
 	compactHeightfield.ch = heightfield.ch;
@@ -448,6 +457,7 @@ bool rcBuildCompactHeightfield(rcContext* context, const int walkableHeight, con
 	const int MAX_HEIGHT = 0xffff;
 
 	// Fill in cells and spans.
+	// 填入cells和spans, cells主要是一些统计信息，减少一些空spans
 	int currentCellIndex = 0;
 	const int numColumns = xSize * zSize;
 	for (int columnIndex = 0; columnIndex < numColumns; ++columnIndex)
@@ -480,6 +490,7 @@ bool rcBuildCompactHeightfield(rcContext* context, const int walkableHeight, con
 	}
 	
 	// Find neighbour connections.
+	// 构造邻居连接信息，加速访问
 	const int MAX_LAYERS = RC_NOT_CONNECTED - 1;
 	int maxLayerIndex = 0;
 	const int zStride = xSize; // for readability
@@ -494,6 +505,7 @@ bool rcBuildCompactHeightfield(rcContext* context, const int walkableHeight, con
 
 				for (int dir = 0; dir < 4; ++dir)
 				{
+					// 初始化为未连接
 					rcSetCon(span, dir, RC_NOT_CONNECTED);
 					const int neighborX = x + rcGetDirOffsetX(dir);
 					const int neighborZ = z + rcGetDirOffsetY(dir);
