@@ -366,7 +366,7 @@ static bool rasterizeTri(const float* v0, const float* v1, const float* v2,
 	{
 		// Clip polygon to row. Store the remaining polygon as well
 		const float cellZ = hfBBMin[2] + (float)z * cellSize;
-		// 分为in和p1两部分
+		// 分为inRow和p1两部分
 		dividePoly(in, nvIn, inRow, &nvRow, p1, &nvIn, cellZ + cellSize, RC_AXIS_Z);
 		// 交换in和p1，以便后面循环继续用in切割
 		rcSwap(in, p1);
@@ -411,30 +411,35 @@ static bool rasterizeTri(const float* v0, const float* v1, const float* v2,
 		{
 			// Clip polygon to column. store the remaining polygon as well
 			const float cx = hfBBMin[0] + (float)x * cellSize;
+			// 对inRow用x轴再切一刀，分别存在p1和p2
 			dividePoly(inRow, nv2, p1, &nv, p2, &nv2, cx + cellSize, RC_AXIS_X);
+			// 交换inRow和p2, 方便继续切割
 			rcSwap(inRow, p2);
 			
-			if (nv < 3)
+			if (nv < 3)// 没切到
 			{
 				continue;
 			}
-			if (x < 0)
+			if (x < 0)// 非法x坐标过滤
 			{
 				continue;
 			}
 			
 			// Calculate min and max of the span.
-			float spanMin = p1[1];
+			// 根据p1里切割出来的多边形计算span
+			float spanMin = p1[1];// min和max都初始化为第一个点的y坐标
 			float spanMax = p1[1];
-			for (int vert = 1; vert < nv; ++vert)
+			for (int vert = 1; vert < nv; ++vert)// 遍历其它顶点，找到最大最小值
 			{
 				spanMin = rcMin(spanMin, p1[vert * 3 + 1]);
 				spanMax = rcMax(spanMax, p1[vert * 3 + 1]);
 			}
+			// 去相对高度场最大最小y坐标
 			spanMin -= hfBBMin[1];
 			spanMax -= hfBBMin[1];
 			
 			// Skip the span if it's completely outside the heightfield bounding box
+			// 高度场范围外过滤
 			if (spanMax < 0.0f)
 			{
 				continue;
@@ -445,6 +450,7 @@ static bool rasterizeTri(const float* v0, const float* v1, const float* v2,
 			}
 			
 			// Clamp the span to the heightfield bounding box.
+			// span范围修正，切掉不在高度场范围部分
 			if (spanMin < 0.0f)
 			{
 				spanMin = 0;
@@ -455,9 +461,10 @@ static bool rasterizeTri(const float* v0, const float* v1, const float* v2,
 			}
 
 			// Snap the span to the heightfield height grid.
+			// 高度除以cellheight，得到高度索引
 			unsigned short spanMinCellIndex = (unsigned short)rcClamp((int)floorf(spanMin * inverseCellHeight), 0, RC_SPAN_MAX_HEIGHT);
 			unsigned short spanMaxCellIndex = (unsigned short)rcClamp((int)ceilf(spanMax * inverseCellHeight), (int)spanMinCellIndex + 1, RC_SPAN_MAX_HEIGHT);
-
+			// 插入高度场
 			if (!addSpan(hf, x, z, spanMinCellIndex, spanMaxCellIndex, areaID, flagMergeThreshold))
 			{
 				return false;

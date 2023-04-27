@@ -30,21 +30,23 @@ static int getCornerHeight(int x, int y, int i, int dir,
 						   bool& isBorderVertex)
 {
 	const rcCompactSpan& s = chf.spans[i];
-	int ch = (int)s.y;
+	int ch = (int)s.y;//span的下表面高度
 	int dirp = (dir+1) & 0x3;
-	
+	// 假设dir=上，则regs[4]每个索引分别表示 0=自己 1=上 2=右上 3=右
 	unsigned int regs[4] = {0,0,0,0};
 	
 	// Combine region and area codes in order to prevent
 	// border vertices which are in between two areas to be removed.
+	//把regionid和areaid组合，避免两个area间的边界点被移除
 	regs[0] = chf.spans[i].reg | (chf.areas[i] << 16);
-	
+	//计算regs[0]-regs[3]
 	if (rcGetCon(s, dir) != RC_NOT_CONNECTED)
 	{
 		const int ax = x + rcGetDirOffsetX(dir);
 		const int ay = y + rcGetDirOffsetY(dir);
 		const int ai = (int)chf.cells[ax+ay*chf.width].index + rcGetCon(s, dir);
 		const rcCompactSpan& as = chf.spans[ai];
+		// 高度取自己和邻居的最高点
 		ch = rcMax(ch, (int)as.y);
 		regs[1] = chf.spans[ai].reg | (chf.areas[ai] << 16);
 		if (rcGetCon(as, dirp) != RC_NOT_CONNECTED)
@@ -53,6 +55,7 @@ static int getCornerHeight(int x, int y, int i, int dir,
 			const int ay2 = ay + rcGetDirOffsetY(dirp);
 			const int ai2 = (int)chf.cells[ax2+ay2*chf.width].index + rcGetCon(as, dirp);
 			const rcCompactSpan& as2 = chf.spans[ai2];
+			// 高度取自己和邻居的最高点
 			ch = rcMax(ch, (int)as2.y);
 			regs[2] = chf.spans[ai2].reg | (chf.areas[ai2] << 16);
 		}
@@ -63,6 +66,7 @@ static int getCornerHeight(int x, int y, int i, int dir,
 		const int ay = y + rcGetDirOffsetY(dirp);
 		const int ai = (int)chf.cells[ax+ay*chf.width].index + rcGetCon(s, dirp);
 		const rcCompactSpan& as = chf.spans[ai];
+		// 高度取自己和邻居的最高点
 		ch = rcMax(ch, (int)as.y);
 		regs[3] = chf.spans[ai].reg | (chf.areas[ai] << 16);
 		if (rcGetCon(as, dir) != RC_NOT_CONNECTED)
@@ -71,12 +75,14 @@ static int getCornerHeight(int x, int y, int i, int dir,
 			const int ay2 = ay + rcGetDirOffsetY(dir);
 			const int ai2 = (int)chf.cells[ax2+ay2*chf.width].index + rcGetCon(as, dir);
 			const rcCompactSpan& as2 = chf.spans[ai2];
+			// 高度取自己和邻居的最高点
 			ch = rcMax(ch, (int)as2.y);
 			regs[2] = chf.spans[ai2].reg | (chf.areas[ai2] << 16);
 		}
 	}
 
 	// Check if the vertex is special edge vertex, these vertices will be removed later.
+	//检查顶点是否为特殊边顶点，这些顶点稍后会被移除。
 	for (int j = 0; j < 4; ++j)
 	{
 		const int a = j;
@@ -86,13 +92,16 @@ static int getCornerHeight(int x, int y, int i, int dir,
 		
 		// The vertex is a border vertex there are two same exterior cells in a row,
 		// followed by two interior cells and none of the regions are out of bounds.
+		// 自己和上的region和area相同，并且都是边界
 		const bool twoSameExts = (regs[a] & regs[b] & RC_BORDER_REG) != 0 && regs[a] == regs[b];
+		// 右和右上都不是边界
 		const bool twoInts = ((regs[c] | regs[d]) & RC_BORDER_REG) == 0;
 		const bool intsSameArea = (regs[c]>>16) == (regs[d]>>16);
+		// 右和右上area相同
 		const bool noZeros = regs[a] != 0 && regs[b] != 0 && regs[c] != 0 && regs[d] != 0;
 		if (twoSameExts && twoInts && intsSameArea && noZeros)
 		{
-			isBorderVertex = true;
+			isBorderVertex = true;//特殊边界点
 			break;
 		}
 	}
@@ -100,6 +109,15 @@ static int getCornerHeight(int x, int y, int i, int dir,
 	return ch;
 }
 
+// 遍历轮廓
+// 和分区逻辑类似
+/*
+算法描述：
+找到区域任意一个区域边A，以当前区域边开始算法。
+如果当前是区域边，将当前区域边添加到轮廓中，然后顺时针旋转90度，继续判断旋转后的边。
+如果当前是内部边，则进入到共当前边的邻居内，然后逆时针旋转90度，继续判断旋转后的边。
+直到回到区域边A为止，结束，此时依次添加进轮廓中的所有边界边全部查找完毕。
+*/
 static void walkContour(int x, int y, int i,
 						rcCompactHeightfield& chf,
 						unsigned char* flags, rcIntArray& points)
@@ -114,22 +132,35 @@ static void walkContour(int x, int y, int i,
 	
 	const unsigned char area = chf.areas[i];
 	
+	/*
+	如果我们想回到向量空间，我们需要的是顶点，而不是边。顶点的(x, z)值很容易确定。
+	对于每条边，我们从边沿顺时针方向取span顶部的角（corner）的(x, z)值(从span内部看)
+	确定顶点的y值就比较棘手了。这就是我们回归3D可视化的地方
+	*/
 	int iter = 0;
 	while (++iter < 40000)
 	{
-		if (flags[i] & (1 << dir))
+		if (flags[i] & (1 << dir))// 区域边
 		{
 			// Choose the edge corner
 			bool isBorderVertex = false;
 			bool isAreaBorder = false;
 			int px = x;
+			// 获取高度和是否特殊边界点
 			int py = getCornerHeight(x, y, i, dir, chf, isBorderVertex);
 			int pz = y;
+			// 为了使相邻region walk出来的轮廓边互相重合，所以并不一定是以自身为轮廓，而是按照一下规则
+			/*
+			体素左方是边界，轮廓点取其上方体素。
+			体素上方是边界，轮廓点取其右上方体素。
+			体素右方是边界，轮廓点取其右方体素。
+			体素下方是边界，轮廓点取其自身。
+			*/
 			switch(dir)
 			{
-				case 0: pz++; break;
-				case 1: px++; pz++; break;
-				case 2: px++; break;
+				case 0: pz++; break;         //1. 体素左方是边界，轮廓点取其上方体素。
+				case 1: px++; pz++; break;   //2. 体素上方是边界，轮廓点取其右上方体素。
+				case 2: px++; break;         //3. 体素右方是边界，轮廓点取其右方体素。
 			}
 			int r = 0;
 			const rcCompactSpan& s = chf.spans[i];
@@ -138,23 +169,26 @@ static void walkContour(int x, int y, int i,
 				const int ax = x + rcGetDirOffsetX(dir);
 				const int ay = y + rcGetDirOffsetY(dir);
 				const int ai = (int)chf.cells[ax+ay*chf.width].index + rcGetCon(s, dir);
+				// r先设为邻居的区域
 				r = (int)chf.spans[ai].reg;
 				if (area != chf.areas[ai])
 					isAreaBorder = true;
 			}
-			if (isBorderVertex)
+			// 再带上边界flag
+			if (isBorderVertex)// 
 				r |= RC_BORDER_VERTEX;
-			if (isAreaBorder)
+			if (isAreaBorder)// area边界
 				r |= RC_AREA_BORDER;
+			// 压到点集（x,y,z,r）
 			points.push(px);
 			points.push(py);
 			points.push(pz);
 			points.push(r);
-			
+			// 去掉已访问的边
 			flags[i] &= ~(1 << dir); // Remove visited edges
-			dir = (dir+1) & 0x3;  // Rotate CW
+			dir = (dir+1) & 0x3;  // 顺时针旋转，Rotate CW
 		}
-		else
+		else// 内部边
 		{
 			int ni = -1;
 			const int nx = x + rcGetDirOffsetX(dir);
@@ -170,12 +204,14 @@ static void walkContour(int x, int y, int i,
 				// Should not happen.
 				return;
 			}
+			// 内部边换为邻居点
 			x = nx;
 			y = ny;
 			i = ni;
-			dir = (dir+3) & 0x3;	// Rotate CCW
+			dir = (dir+3) & 0x3;	// 逆时针旋转，Rotate CCW
 		}
 		
+		// 回到初始位置初始方向，结束
 		if (starti == i && startDir == dir)
 		{
 			break;
@@ -820,6 +856,7 @@ static void mergeRegionHoles(rcContext* ctx, rcContourRegion& region)
 /// See the #rcConfig documentation for more information on the configuration parameters.
 ///
 /// @see rcAllocContourSet, rcCompactHeightfield, rcContourSet, rcConfig
+/// 生成和简化轮廓
 bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 					 const float maxError, const int maxEdgeLen,
 					 rcContourSet& cset, const int buildFlags)
@@ -834,7 +871,7 @@ bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 	
 	rcVcopy(cset.bmin, chf.bmin);
 	rcVcopy(cset.bmax, chf.bmax);
-	if (borderSize > 0)
+	if (borderSize > 0)// 去除边界
 	{
 		// If the heightfield was build with bordersize, remove the offset.
 		const float pad = borderSize*chf.cs;
@@ -856,6 +893,7 @@ bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 		return false;
 	cset.nconts = 0;
 	
+	// 申请标志数组，用于记录是区域边还是内部边
 	rcScopedDelete<unsigned char> flags((unsigned char*)rcAlloc(sizeof(unsigned char)*chf.spanCount, RC_ALLOC_TEMP));
 	if (!flags)
 	{
@@ -866,6 +904,7 @@ bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 	ctx->startTimer(RC_TIMER_BUILD_CONTOURS_TRACE);
 	
 	// Mark boundaries.
+	// 标记区域边
 	for (int y = 0; y < h; ++y)
 	{
 		for (int x = 0; x < w; ++x)
@@ -875,12 +914,12 @@ bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 			{
 				unsigned char res = 0;
 				const rcCompactSpan& s = chf.spans[i];
-				if (!chf.spans[i].reg || (chf.spans[i].reg & RC_BORDER_REG))
+				if (!chf.spans[i].reg || (chf.spans[i].reg & RC_BORDER_REG))// 边界和空洞直接标记为0
 				{
 					flags[i] = 0;
 					continue;
 				}
-				for (int dir = 0; dir < 4; ++dir)
+				for (int dir = 0; dir < 4; ++dir)// 四个邻居
 				{
 					unsigned short r = 0;
 					if (rcGetCon(s, dir) != RC_NOT_CONNECTED)
@@ -890,9 +929,10 @@ bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 						const int ai = (int)chf.cells[ax+ay*w].index + rcGetCon(s, dir);
 						r = chf.spans[ai].reg;
 					}
-					if (r == chf.spans[i].reg)
+					if (r == chf.spans[i].reg)// 区域相同，对应方向设为1
 						res |= (1 << dir);
 				}
+				// flags取反，1表示是区域边
 				flags[i] = res ^ 0xf; // Inverse, mark non connected edges.
 			}
 		}
@@ -902,7 +942,7 @@ bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 	
 	rcIntArray verts(256);
 	rcIntArray simplified(64);
-	
+	// 从边转变为点，3D化的第一步
 	for (int y = 0; y < h; ++y)
 	{
 		for (int x = 0; x < w; ++x)
@@ -910,23 +950,25 @@ bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 			const rcCompactCell& c = chf.cells[x+y*w];
 			for (int i = (int)c.index, ni = (int)(c.index+c.count); i < ni; ++i)
 			{
-				if (flags[i] == 0 || flags[i] == 0xf)
+				if (flags[i] == 0 || flags[i] == 0xf)// 如果四条边都是区域边，则重置为0（单span区域）
 				{
 					flags[i] = 0;
 					continue;
 				}
 				const unsigned short reg = chf.spans[i].reg;
-				if (!reg || (reg & RC_BORDER_REG))
+				if (!reg || (reg & RC_BORDER_REG))// 空洞和边界过滤
 					continue;
 				const unsigned char area = chf.areas[i];
 				
 				verts.clear();
 				simplified.clear();
 				
+				// 根据边得到顶点，3D化的第一步
 				ctx->startTimer(RC_TIMER_BUILD_CONTOURS_TRACE);
 				walkContour(x, y, i, chf, flags, verts);
 				ctx->stopTimer(RC_TIMER_BUILD_CONTOURS_TRACE);
 				
+				// 简化轮廓
 				ctx->startTimer(RC_TIMER_BUILD_CONTOURS_SIMPLIFY);
 				simplifyContour(verts, simplified, maxError, maxEdgeLen, buildFlags);
 				removeDegenerateSegments(simplified);
@@ -1005,7 +1047,7 @@ bool rcBuildContours(rcContext* ctx, rcCompactHeightfield& chf,
 	}
 	
 	// Merge holes if needed.
-	if (cset.nconts > 0)
+	if (cset.nconts > 0)// 合并空洞
 	{
 		// Calculate winding of all polygons.
 		rcScopedDelete<signed char> winding((signed char*)rcAlloc(sizeof(signed char)*cset.nconts, RC_ALLOC_TEMP));

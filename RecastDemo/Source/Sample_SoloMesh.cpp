@@ -414,15 +414,15 @@ bool Sample_SoloMesh::handleBuild()
 	// 生成区域轮廓时，生成轮廓在xz平面上两点直接的最大格子数
 	m_cfg.maxEdgeLen = (int)(m_edgeMaxLen / m_cellSize);
 	m_cfg.maxSimplificationError = m_edgeMaxError;
-	// 最小区域面积
+	// 最小span数量(可以是多个连通区域加起来超过此区域即可)
 	m_cfg.minRegionArea = (int)rcSqr(m_regionMinSize);		// Note: area = size*size
-	// 合并区域面积
+	// 合并区域span数量，小于此span数量的区域会被合并
 	m_cfg.mergeRegionArea = (int)rcSqr(m_regionMergeSize);	// Note: area = size*size
 	// 单个多边形最多点数（最多几边形）
 	m_cfg.maxVertsPerPoly = (int)m_vertsPerPoly;
-	// 采样距离？
+	// 细节采样距离
 	m_cfg.detailSampleDist = m_detailSampleDist < 0.9f ? 0 : m_cellSize * m_detailSampleDist;
-	// 采样最大错误数？
+	// 细节采样最大高度错误值
 	m_cfg.detailSampleMaxError = m_cellHeight * m_detailSampleMaxError;
 	
 	// Set the area where the navigation will be build.
@@ -445,7 +445,7 @@ bool Sample_SoloMesh::handleBuild()
 	m_ctx->log(RC_LOG_PROGRESS, " - %.1fK verts, %.1fK tris", nverts/1000.0f, ntris/1000.0f);
 	
 	//
-	// Step 2. 体素化Rasterize input polygon soup.
+	// Step 2. 栅格化Rasterize input polygon soup.
 	//
 	
 	// 申请体素高度场数据Allocate voxel heightfield where we rasterize our input data to.
@@ -475,8 +475,8 @@ bool Sample_SoloMesh::handleBuild()
 	// 标记可行走三角形 Find triangles which are walkable based on their slope and rasterize them.
 	// If your input data is multiple meshes, you can transform them here, calculate
 	// the are type for each of the meshes and rasterize them.
-	memset(m_triareas, 0, ntris*sizeof(unsigned char));// 默认把区域设为不可行走
-	// 标记可行走的三角形平面(斜率过滤)
+	memset(m_triareas, 0, ntris*sizeof(unsigned char));// 默认把区域area_id设为0
+	// 标记可行走的三角形平面(斜率过滤)，把可行走三角形area_id设为RC_WALKABLE_AREA
 	rcMarkWalkableTriangles(m_ctx, m_cfg.walkableSlopeAngle, verts, nverts, tris, ntris, m_triareas);
 	// 体素化
 	if (!rcRasterizeTriangles(m_ctx, verts, nverts, tris, m_triareas, ntris, *m_solid, m_cfg.walkableClimb))
@@ -498,13 +498,13 @@ bool Sample_SoloMesh::handleBuild()
 	// Once all geoemtry is rasterized, we do initial pass of filtering to
 	// remove unwanted overhangs caused by the conservative rasterization
 	// as well as filter spans where the character cannot possibly stand.
-	// 根据攀登高度级联可行走span（直立楼梯）
+	// 可攀登高度的并且下面的span可行走的，也标记为可行走(直立楼梯)
 	if (m_filterLowHangingObstacles)
 		rcFilterLowHangingWalkableObstacles(m_ctx, m_cfg.walkableClimb, *m_solid);
 	// 悬崖陡坡检测
 	if (m_filterLedgeSpans)
 		rcFilterLedgeSpans(m_ctx, m_cfg.walkableHeight, m_cfg.walkableClimb, *m_solid);
-	// 过滤高度不足站立的span
+	// 过滤高度不足站立的span，碰头
 	if (m_filterWalkableLowHeightSpans)
 		rcFilterWalkableLowHeightSpans(m_ctx, m_cfg.walkableHeight, *m_solid);
 
@@ -516,26 +516,29 @@ bool Sample_SoloMesh::handleBuild()
 	// Compact the heightfield so that it is faster to handle from now on.
 	// This will result more cache coherent data as well as the neighbours
 	// between walkable cells will be calculated.
+	// 压缩优化高度场数据，反过来记录span间空间，计算连通关系，加速访问，减少空span，提高缓存性能（spans降维）
+	// 由于通过第一步已经知道了span数量，可以直接使用数组静态数据结构
 	m_chf = rcAllocCompactHeightfield();//申请紧凑高度场数据
 	if (!m_chf)
 	{
 		m_ctx->log(RC_LOG_ERROR, "buildNavigation: Out of memory 'chf'.");
 		return false;
 	}
-	// 构建紧凑高度场(反体素化)，加速访问，减少空span等
+	// 构建紧凑高度场(反体素化)，所谓的反体素化，是指和体素化不同，反过来记录span间空间
 	if (!rcBuildCompactHeightfield(m_ctx, m_cfg.walkableHeight, m_cfg.walkableClimb, *m_solid, *m_chf))
 	{
 		m_ctx->log(RC_LOG_ERROR, "buildNavigation: Could not build compact data.");
 		return false;
 	}
-	
+
+	// 清理高度场
 	if (!m_keepInterResults)
 	{
 		rcFreeHeightField(m_solid);
 		m_solid = 0;
 	}
 		
-	// 剔除边缘Erode the walkable area by agent radius.
+	// 使用角色半径腐蚀边缘，扫描计算离不可行走区域距离Erode the walkable area by agent radius.
 	if (!rcErodeWalkableArea(m_ctx, m_cfg.walkableRadius, *m_chf))
 	{
 		m_ctx->log(RC_LOG_ERROR, "buildNavigation: Could not erode.");
@@ -543,9 +546,9 @@ bool Sample_SoloMesh::handleBuild()
 	}
 
 	// (Optional) Mark areas.
-	// 标记区域
-	const ConvexVolume* vols = m_geom->getConvexVolumes();
-	for (int i  = 0; i < m_geom->getConvexVolumeCount(); ++i)
+	// 动态障碍，标记对应体素区域id
+	const ConvexVolume* vols = m_geom->getConvexVolumes();// 凸多边形数组
+	for (int i  = 0; i < m_geom->getConvexVolumeCount(); ++i)// 遍历标志区域
 		rcMarkConvexPolyArea(m_ctx, vols[i].verts, vols[i].nverts, vols[i].hmin, vols[i].hmax, (unsigned char)vols[i].area, *m_chf);
 
 	
@@ -565,7 +568,7 @@ bool Sample_SoloMesh::handleBuild()
 	//   - partitions the heightfield into regions without holes and overlaps (guaranteed)
 	//   - creates long thin polygons, which sometimes causes paths with detours
 	//   * use this if you want fast navmesh generation
-	// 3) 分成分割算法Layer partitoining
+	// 3) 分层分割算法Layer partitoining
 	//   - quite fast
 	//   - partitions the heighfield into non-overlapping regions
 	//   - relies on the triangulation code to cope with holes (thus slower than monotone partitioning)
@@ -575,9 +578,10 @@ bool Sample_SoloMesh::handleBuild()
 	//     if you have large open areas with small obstacles (not a problem if you use tiles)
 	//   * good choice to use for tiled navmesh with medium and small sized tiles
 	
-	if (m_partitionType == SAMPLE_PARTITION_WATERSHED)
+	if (m_partitionType == SAMPLE_PARTITION_WATERSHED)// 分水岭算法
 	{
 		// Prepare for region partitioning, by calculating distance field along the walkable surface.
+		// 创建距离场，结果均值模糊
 		if (!rcBuildDistanceField(m_ctx, *m_chf))
 		{
 			m_ctx->log(RC_LOG_ERROR, "buildNavigation: Could not build distance field.");
@@ -585,13 +589,14 @@ bool Sample_SoloMesh::handleBuild()
 		}
 		
 		// Partition the walkable surface into simple regions without holes.
+		// 分区
 		if (!rcBuildRegions(m_ctx, *m_chf, 0, m_cfg.minRegionArea, m_cfg.mergeRegionArea))
 		{
 			m_ctx->log(RC_LOG_ERROR, "buildNavigation: Could not build watershed regions.");
 			return false;
 		}
 	}
-	else if (m_partitionType == SAMPLE_PARTITION_MONOTONE)
+	else if (m_partitionType == SAMPLE_PARTITION_MONOTONE)// 单调划分算法
 	{
 		// Partition the walkable surface into simple regions without holes.
 		// Monotone partitioning does not need distancefield.
@@ -601,7 +606,7 @@ bool Sample_SoloMesh::handleBuild()
 			return false;
 		}
 	}
-	else // SAMPLE_PARTITION_LAYERS
+	else // SAMPLE_PARTITION_LAYERS 分层分割算法
 	{
 		// Partition the walkable surface into simple regions without holes.
 		if (!rcBuildLayerRegions(m_ctx, *m_chf, 0, m_cfg.minRegionArea))
@@ -613,6 +618,12 @@ bool Sample_SoloMesh::handleBuild()
 	
 	//
 	// Step 5. Trace and simplify region contours.
+	// 轮廓生成和简化
+	// 在经过区域生成之后，region的描述是以span为颗粒度的，此时区域与区域之间的分界就是非常重要的信息了
+	// 其实我们只需要region的轮廓，而轮廓（Contour）就是描述区域边界的概念。
+	// 这个阶段生成表示源几何体的可行走表面的简单多边形（凸多边形和凹多边形）。
+	// 轮廓仍然以体素空间为单位表示，但这是从体素空间（voxel space）回到向量空间（vector space）的过程中的第一步
+	// 
 	//
 	
 	// Create contours.
@@ -622,6 +633,7 @@ bool Sample_SoloMesh::handleBuild()
 		m_ctx->log(RC_LOG_ERROR, "buildNavigation: Out of memory 'cset'.");
 		return false;
 	}
+	// 生成和简化轮廓
 	if (!rcBuildContours(m_ctx, *m_chf, m_cfg.maxSimplificationError, m_cfg.maxEdgeLen, *m_cset))
 	{
 		m_ctx->log(RC_LOG_ERROR, "buildNavigation: Could not create contours.");
@@ -630,6 +642,7 @@ bool Sample_SoloMesh::handleBuild()
 	
 	//
 	// Step 6. Build polygons mesh from contours.
+	// 构建轮廓多边形网格
 	//
 	
 	// Build polygon navmesh from the contours.
@@ -647,6 +660,7 @@ bool Sample_SoloMesh::handleBuild()
 	
 	//
 	// Step 7. Create detail mesh which allows to access approximate height on each polygon.
+	// 创建细节网格(带入高度信息)
 	//
 	
 	m_dmesh = rcAllocPolyMeshDetail();

@@ -42,7 +42,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 	const int h = chf.height;
 	
 	rcScopedTimer timer(ctx, RC_TIMER_ERODE_AREA);
-	
+	// 申请距离数组
 	unsigned char* dist = (unsigned char*)rcAlloc(sizeof(unsigned char)*chf.spanCount, RC_ALLOC_TEMP);
 	if (!dist)
 	{
@@ -62,7 +62,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 			const rcCompactCell& c = chf.cells[x+y*w];
 			for (int i = (int)c.index, ni = (int)(c.index+c.count); i < ni; ++i)
 			{
-				if (chf.areas[i] == RC_NULL_AREA)// 不可行走区域标记为0
+				if (chf.areas[i] == RC_NULL_AREA)// 不可行走区域距离标记为0
 				{
 					dist[i] = 0;
 				}
@@ -72,12 +72,12 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 					int nc = 0;
 					for (int dir = 0; dir < 4; ++dir)
 					{
-						if (rcGetCon(s, dir) != RC_NOT_CONNECTED)
+						if (rcGetCon(s, dir) != RC_NOT_CONNECTED)// 邻居可达
 						{
 							const int nx = x + rcGetDirOffsetX(dir);
 							const int ny = y + rcGetDirOffsetY(dir);
 							const int nidx = (int)chf.cells[nx+ny*w].index + rcGetCon(s, dir);
-							if (chf.areas[nidx] != RC_NULL_AREA)
+							if (chf.areas[nidx] != RC_NULL_AREA)// 邻居可行走
 							{
 								nc++;
 							}
@@ -93,29 +93,32 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 	
 	unsigned char nd;
 	
-	// Pass 1
+	// Pass 1 第一轮， 从左下到右上扫描
 	for (int y = 0; y < h; ++y)
 	{
 		for (int x = 0; x < w; ++x)
 		{
 			const rcCompactCell& c = chf.cells[x+y*w];
+			// 遍历span
 			for (int i = (int)c.index, ni = (int)(c.index+c.count); i < ni; ++i)
 			{
 				const rcCompactSpan& s = chf.spans[i];
-				
-				if (rcGetCon(s, 0) != RC_NOT_CONNECTED)
+				// 遍历四个方向已扫描邻居，更新距离值
+				if (rcGetCon(s, 0) != RC_NOT_CONNECTED)// 0方向连通
 				{
 					// (-1,0) 左边
 					const int ax = x + rcGetDirOffsetX(0);
 					const int ay = y + rcGetDirOffsetY(0);
+					// 邻居连通的span
 					const int ai = (int)chf.cells[ax+ay*w].index + rcGetCon(s, 0);
 					const rcCompactSpan& as = chf.spans[ai];
+					// 邻居的距离+2
 					nd = (unsigned char)rcMin((int)dist[ai]+2, 255);
-					if (nd < dist[i])
+					if (nd < dist[i])// 计算最小距离
 						dist[i] = nd;
 					
-					// (-1,-1)左上
-					if (rcGetCon(as, 3) != RC_NOT_CONNECTED)
+					// (-1,-1)左下
+					if (rcGetCon(as, 3) != RC_NOT_CONNECTED)//斜对角邻居连通，则把距离设置为邻居的邻居的距离+3
 					{
 						const int aax = ax + rcGetDirOffsetX(3);
 						const int aay = ay + rcGetDirOffsetY(3);
@@ -127,7 +130,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 				}
 				if (rcGetCon(s, 3) != RC_NOT_CONNECTED)
 				{
-					// (0,-1)
+					// (0,-1)下
 					const int ax = x + rcGetDirOffsetX(3);
 					const int ay = y + rcGetDirOffsetY(3);
 					const int ai = (int)chf.cells[ax+ay*w].index + rcGetCon(s, 3);
@@ -136,7 +139,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 					if (nd < dist[i])
 						dist[i] = nd;
 					
-					// (1,-1)
+					// (1,-1)右下
 					if (rcGetCon(as, 2) != RC_NOT_CONNECTED)
 					{
 						const int aax = ax + rcGetDirOffsetX(2);
@@ -151,7 +154,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 		}
 	}
 	
-	// Pass 2
+	// Pass 2 第二轮，从右上向左下扫描
 	for (int y = h-1; y >= 0; --y)
 	{
 		for (int x = w-1; x >= 0; --x)
@@ -160,10 +163,10 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 			for (int i = (int)c.index, ni = (int)(c.index+c.count); i < ni; ++i)
 			{
 				const rcCompactSpan& s = chf.spans[i];
-				
+				// 遍历四个方向已扫描邻居，更新距离值
 				if (rcGetCon(s, 2) != RC_NOT_CONNECTED)
 				{
-					// (1,0)
+					// (1,0)右
 					const int ax = x + rcGetDirOffsetX(2);
 					const int ay = y + rcGetDirOffsetY(2);
 					const int ai = (int)chf.cells[ax+ay*w].index + rcGetCon(s, 2);
@@ -172,7 +175,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 					if (nd < dist[i])
 						dist[i] = nd;
 					
-					// (1,1)
+					// (1,1)右上
 					if (rcGetCon(as, 1) != RC_NOT_CONNECTED)
 					{
 						const int aax = ax + rcGetDirOffsetX(1);
@@ -185,7 +188,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 				}
 				if (rcGetCon(s, 1) != RC_NOT_CONNECTED)
 				{
-					// (0,1)
+					// (0,1)上
 					const int ax = x + rcGetDirOffsetX(1);
 					const int ay = y + rcGetDirOffsetY(1);
 					const int ai = (int)chf.cells[ax+ay*w].index + rcGetCon(s, 1);
@@ -194,7 +197,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 					if (nd < dist[i])
 						dist[i] = nd;
 					
-					// (-1,1)
+					// (-1,1)左下
 					if (rcGetCon(as, 0) != RC_NOT_CONNECTED)
 					{
 						const int aax = ax + rcGetDirOffsetX(0);
@@ -211,7 +214,7 @@ bool rcErodeWalkableArea(rcContext* ctx, int radius, rcCompactHeightfield& chf)
 	
 	const unsigned char thr = (unsigned char)(radius*2);
 	for (int i = 0; i < chf.spanCount; ++i)
-		if (dist[i] < thr)
+		if (dist[i] < thr)// 距离小于角色半径的2倍的，设为不可行走
 			chf.areas[i] = RC_NULL_AREA;
 	
 	rcFree(dist);
@@ -379,6 +382,7 @@ static int pointInPoly(int nvert, const float* verts, const float* p)
 /// projected onto the xz-plane at @p hmin, then extruded to @p hmax.
 /// 
 /// @see rcCompactHeightfield, rcMedianFilterWalkableArea
+/// 把区域id记录到指定凸多边形的所有span
 void rcMarkConvexPolyArea(rcContext* ctx, const float* verts, const int nverts,
 						  const float hmin, const float hmax, unsigned char areaId,
 						  rcCompactHeightfield& chf)
@@ -431,9 +435,9 @@ void rcMarkConvexPolyArea(rcContext* ctx, const float* verts, const int nverts,
 				{
 					float p[3];
 					p[0] = chf.bmin[0] + (x+0.5f)*chf.cs; 
-					p[1] = 0;
+					p[1] = 0;// 为什么y坐标为0？后面算法只在x-z平面
 					p[2] = chf.bmin[2] + (z+0.5f)*chf.cs; 
-
+					// 如果点在多边形内（动态阻挡的xz平面投影）
 					if (pointInPoly(nverts, verts, p))
 					{
 						chf.areas[i] = areaId;

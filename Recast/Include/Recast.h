@@ -342,6 +342,7 @@ struct rcCompactSpan
 {
 	unsigned short y;			///< The lower extent of the span. (Measured from the heightfield's base.)
 	unsigned short reg;			///< The id of the region the span belongs to. (Or zero if not in a region.)
+	// ??????
 	unsigned int con : 24;		///< Packed neighbor connection data.
 	unsigned int h : 8;			///< The height of the span.  (Measured from #y.)
 };
@@ -365,9 +366,13 @@ struct rcCompactHeightfield
 	float bmax[3];				///< The maximum bounds in world space. [(x, y, z)]
 	float cs;					///< The size of each cell. (On the xz-plane.)
 	float ch;					///< The height of each cell. (The minimum increment along the y-axis.)
+	// cell????
 	rcCompactCell* cells;		///< Array of cells. [Size: #width*#height]
+	// ????span?????
 	rcCompactSpan* spans;		///< Array of spans. [Size: #spanCount]
+	// ??span?????
 	unsigned short* dist;		///< Array containing border distance data. [Size: #spanCount]
+	// ??span???
 	unsigned char* areas;		///< Array containing area id data. [Size: #spanCount]
 	
 private:
@@ -415,23 +420,30 @@ private:
 };
 
 /// Represents a simple, non-overlapping contour in field space.
+// ??
 struct rcContour
 {
+	// ?????
 	int* verts;			///< Simplified contour vertex and connection data. [Size: 4 * #nverts]
 	int nverts;			///< The number of vertices in the simplified contour. 
+	// ?????
 	int* rverts;		///< Raw contour vertex and connection data. [Size: 4 * #nrverts]
 	int nrverts;		///< The number of vertices in the raw contour. 
+	// ??id
 	unsigned short reg;	///< The region id of the contour.
+	// area id
 	unsigned char area;	///< The area id of the contour.
 };
 
 /// Represents a group of related contours.
 /// @ingroup recast
+// ???
 struct rcContourSet
 {
 	rcContourSet();
 	~rcContourSet();
 	
+	// ????
 	rcContour* conts;	///< An array of the contours in the set. [Size: #nconts]
 	int nconts;			///< The number of contours in the set.
 	float bmin[3];  	///< The minimum bounds in world space. [(x, y, z)]
@@ -1111,6 +1123,7 @@ void rcMarkBoxArea(rcContext* ctx, const float* bmin, const float* bmax, unsigne
 				   rcCompactHeightfield& chf);
 
 /// Applies the area id to the all spans within the specified convex polygon. 
+/// ???id????????????span
 /// @ingroup recast
 /// @param[in,out]	ctx		The build context to use during the operation.
 /// @param[in]		verts	The vertices of the polygon [Fomr: (x, y, z) * @p nverts]
